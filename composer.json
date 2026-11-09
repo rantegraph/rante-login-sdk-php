@@ -1,0 +1,39 @@
+{
+    "name": "rante/login-sdk",
+    "description": "\"Sign in with Rante\" for PHP servers: authorize URL with PKCE, code exchange with private_key_jwt, ID token validation and userinfo, on firebase/php-jwt.",
+    "type": "library",
+    "license": "MIT",
+    "homepage": "https://github.com/rante-corporation/rante-login-sdk-php",
+    "authors": [
+        {
+            "name": "Rante Corporation"
+        }
+    ],
+    "require": {
+        "php": "^8.2",
+        "ext-curl": "*",
+        "ext-json": "*",
+        "ext-openssl": "*",
+        "firebase/php-jwt": "^7.2",
+        "psr/simple-cache": "^3.0"
+    },
+    "require-dev": {
+        "phpunit/phpunit": "^11.5 || ^12.0 || ^13.0"
+    },
+    "autoload": {
+        "psr-4": {
+            "Rante\\Login\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Rante\\Login\\Tests\\": "tests/"
+        }
+    },
+    "config": {
+        "sort-packages": true
+    },
+    "scripts": {
+        "test": "phpunit"
+    }
+}
