@@ -105,9 +105,11 @@ function home(RanteLoginClient $rante): void
         $user = $_SESSION['user'];
         $name = $user['claims']['name'] ?? null;
         echo page('Signed in', '<h1>Signed in' . (is_string($name) ? ' as ' . e($name) : '') . '</h1>'
+            . '<p>Signed in with: <strong>' . e($user['method']) . '</strong>, ' . e($user['signedInAt']) . '</p>'
+            . accountSection($user)
+            . '<h2>ID token</h2>'
             . '<p>This server validated the ID token below. Use <code>sub</code> as the person\'s ID on this website: it is pairwise, '
             . 'so other organizations\' apps see a different value.</p>'
-            . '<p>Signed in with: <strong>' . e($user['method']) . '</strong>, ' . e($user['signedInAt']) . '</p>'
             . table($user['claims'])
             . '<p><a href="/userinfo">Show userinfo</a></p>'
             . '<form method="post" action="/auth/sign-out"><button type="submit">Sign out</button></form>');
@@ -212,11 +214,107 @@ function signOut(string $siteOrigin, bool $secure): void
     header('Location: /', true, 303);
 }
 
-// A new session ID for the person who signed in, so a session fixed before sign-in is worthless.
+// A new session ID for the person who signed in, so a session fixed before sign-in is worthless. The sign-in also creates
+// or finds their account on this website.
 function startSession(ValidatedIdToken $token, ?string $accessToken, string $method): void
 {
+    [, $created] = registerOrFind($token->claims);
     session_regenerate_id(true);
-    $_SESSION = ['user' => ['claims' => $token->claims, 'accessToken' => $accessToken, 'method' => $method, 'signedInAt' => gmdate('Y-m-d\TH:i:s\Z')]];
+    $_SESSION = ['user' => ['claims' => $token->claims, 'accessToken' => $accessToken, 'method' => $method,
+        'signedInAt' => gmdate('Y-m-d\TH:i:s\Z'), 'newAccount' => $created]];
+}
+
+/**
+ * This website's own accounts. A person's first "Sign in with Rante" here is their sign-up: the account is created from
+ * the claims they agreed to share, and every later sign-in finds it by `sub`. A real website keeps accounts in its
+ * database; PHP keeps nothing in memory between requests, so this example keeps them in a JSON file in the temp folder
+ * (it holds the names and emails of the people who signed in: delete it when you're done).
+ *
+ * @param array<string, mixed> $claims
+ * @return array{0: array<string, mixed>, 1: bool} the account, and whether it was created now
+ */
+function registerOrFind(array $claims): array
+{
+    $handle = fopen(accountsFile(), 'c+');
+    if ($handle === false) {
+        throw new RuntimeException('The accounts file could not be opened.');
+    }
+    try {
+        flock($handle, LOCK_EX);
+        $accounts = json_decode((string) stream_get_contents($handle), true);
+        $accounts = is_array($accounts) ? $accounts : [];
+        $sub = (string) $claims['sub'];
+        $now = gmdate('Y-m-d\TH:i:s\Z');
+        $created = !isset($accounts[$sub]);
+        if ($created) {
+            $accounts[$sub] = ['id' => uuid(), 'sub' => $sub, 'name' => null, 'email' => null, 'createdAt' => $now];
+        }
+        // Keep the details the person shares this time. Rante shares an email only once it's verified.
+        $accounts[$sub]['name'] = is_string($claims['name'] ?? null) ? $claims['name'] : $accounts[$sub]['name'];
+        $accounts[$sub]['email'] = is_string($claims['email'] ?? null) ? $claims['email'] : $accounts[$sub]['email'];
+        $accounts[$sub]['lastSignInAt'] = $now;
+        ftruncate($handle, 0);
+        rewind($handle);
+        fwrite($handle, (string) json_encode($accounts, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+        fflush($handle);
+        return [$accounts[$sub], $created];
+    } finally {
+        flock($handle, LOCK_UN);
+        fclose($handle);
+    }
+}
+
+/** @return array<string, mixed>|null */
+function findAccount(string $sub): ?array
+{
+    $handle = @fopen(accountsFile(), 'r');
+    if ($handle === false) {
+        return null;
+    }
+    try {
+        flock($handle, LOCK_SH);
+        $accounts = json_decode((string) stream_get_contents($handle), true);
+        return is_array($accounts) && isset($accounts[$sub]) ? $accounts[$sub] : null;
+    } finally {
+        flock($handle, LOCK_UN);
+        fclose($handle);
+    }
+}
+
+function accountsFile(): string
+{
+    return sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'rante-login-php-example-accounts.json';
+}
+
+function uuid(): string
+{
+    $bytes = random_bytes(16);
+    $bytes[6] = chr((ord($bytes[6]) & 0x0f) | 0x40);
+    $bytes[8] = chr((ord($bytes[8]) & 0x3f) | 0x80);
+    return vsprintf('%s%s-%s-%s-%s-%s%s%s', str_split(bin2hex($bytes), 4));
+}
+
+/** @param array<string, mixed> $user */
+function accountSection(array $user): string
+{
+    $account = findAccount((string) ($user['claims']['sub'] ?? ''));
+    if ($account === null) {
+        return '<h2>Your account on this website</h2><p>Not found: the accounts file was removed since you signed in. Sign out and '
+            . 'in again.</p>';
+    }
+    $status = ($user['newAccount'] ?? false) === true
+        ? 'Created at this sign-in from your Rante account: no separate sign-up form, and no password for this website.'
+        : 'Welcome back: this sign-in found your account by its Rante ID.';
+    return '<h2>Your account on this website</h2><p>' . e($status) . '</p><table><tbody>'
+        . '<tr><th>Account ID</th><td>' . e((string) $account['id']) . '</td></tr>'
+        . '<tr><th>Linked Rante ID (<code>sub</code>)</th><td>' . e((string) $account['sub']) . '</td></tr>'
+        . '<tr><th>Name</th><td>' . e((string) ($account['name'] ?? 'not shared')) . '</td></tr>'
+        . '<tr><th>Email</th><td>' . e((string) ($account['email'] ?? "not shared (Rante shares an email only once it's verified)")) . '</td></tr>'
+        . '<tr><th>Created</th><td>' . e((string) $account['createdAt']) . '</td></tr>'
+        . '<tr><th>Last sign-in</th><td>' . e((string) $account['lastSignInAt']) . '</td></tr>'
+        . '</tbody></table>'
+        . '<p>This example keeps accounts in a JSON file in the temp folder, because PHP keeps nothing in memory between requests. '
+        . 'A real website stores them in its database, keyed by <code>sub</code>.</p>';
 }
 
 function notFound(): void
