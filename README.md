@@ -7,7 +7,7 @@
 - validates the ID token before you trust who signed in;
 - calls the userinfo endpoint.
 
-It finishes sign-ins started by the [Rante Login browser SDK](https://github.com/rante-corporation/rante-login-sdk)
+It finishes sign-ins started by the [Rante Login browser SDK](https://github.com/rantegraph/rante-login-sdk)
 too, including FedCM sign-ins in Chrome and Edge.
 
 The SDK is a thin layer over [firebase/php-jwt](https://github.com/googleapis/php-jwt), which does every JWT and key
@@ -20,7 +20,7 @@ The package isn't on Packagist. Add the repository to your `composer.json`, then
 
 ```json
 {
-    "repositories": [{ "type": "vcs", "url": "https://github.com/rante-corporation/rante-login-sdk-php" }],
+    "repositories": [{ "type": "vcs", "url": "https://github.com/rantegraph/rante-login-sdk-php" }],
     "require": { "rante/login-sdk": "^1.0" }
 }
 ```
